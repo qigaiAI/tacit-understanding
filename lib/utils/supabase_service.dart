@@ -91,6 +91,44 @@ class SupabaseService {
       throw Exception('该昵称已被使用，请选择其他昵称');
     }
     
+    // 检查是否有同名的已离开玩家，如果有则更新为重新加入
+    final leftPlayers = await supabase
+        .from('players')
+        .select()
+        .eq('room_id', roomId)
+        .eq('name', playerName)
+        .filter('left_at', 'not.is', null);
+    
+    if (leftPlayers.isNotEmpty) {
+      // 重新激活已离开的玩家
+      final playerId = leftPlayers[0]['id'];
+      await supabase
+          .from('players')
+          .update({
+            'left_at': null,
+            'joined_at': DateTime.now().toIso8601String(),
+            'is_host': isHost,
+          })
+          .eq('id', playerId);
+      
+      // 返回更新后的玩家信息
+      final updatedPlayer = await supabase
+          .from('players')
+          .select()
+          .eq('id', playerId)
+          .single();
+      
+      return Player(
+        id: updatedPlayer['id'],
+        roomId: updatedPlayer['room_id'],
+        name: updatedPlayer['name'],
+        isHost: updatedPlayer['is_host'],
+        score: updatedPlayer['score'] ?? 0,
+        joinedAt: DateTime.parse(updatedPlayer['joined_at']),
+        leftAt: null,
+      );
+    }
+    
     final response = await supabase.from('players').insert({
       'room_id': roomId,
       'name': playerName,
@@ -171,30 +209,60 @@ class SupabaseService {
     }).select();
   }
 
-  // 监听玩家变化
+  // 监听玩家变化 - 使用轮询机制确保可靠性
+  Timer? _playerPollTimer;
+  
   void listenToPlayers(String roomId, Function(List<Player>) callback) {
-    // 取消之前的订阅
+    // 取消之前的订阅和定时器
     final playerKey = 'players_$roomId';
     if (_subscriptions.containsKey(playerKey)) {
       _subscriptions[playerKey]?.cancel();
     }
+    _playerPollTimer?.cancel();
     
-    final subscription = supabase
-        .from('players')
-        .stream(primaryKey: ['id'])
-        .eq('room_id', roomId)
-        .order('joined_at', ascending: true)
-        .listen((data) {
-      print('Received player updates: ${data.length} players');
-      final players = data.map((e) => Player.fromJson(e)).where((p) => p.leftAt == null).toList();
-      print('Filtered players: ${players.map((p) => p.name).toList()}');
+    // 首先立即获取一次数据
+    getPlayers(roomId).then((players) {
+      print('Initial player load: ${players.length} players');
       callback(players);
-    }, onError: (error) {
-      print('Error in player listener: $error');
     });
     
-    // 保存订阅引用
-    _subscriptions[playerKey] = subscription;
+    // 尝试使用实时流（如果Supabase实时功能可用）
+    try {
+      final subscription = supabase
+          .from('players')
+          .stream(primaryKey: ['id'])
+          .eq('room_id', roomId)
+          .order('joined_at', ascending: true)
+          .listen((data) {
+        print('Stream received player updates: ${data.length} players');
+        final players = data.map((e) => Player.fromJson(e)).where((p) => p.leftAt == null).toList();
+        print('Stream filtered players: ${players.map((p) => p.name).toList()}');
+        callback(players);
+      }, onError: (error) {
+        print('Error in player stream: $error');
+      });
+      
+      _subscriptions[playerKey] = subscription;
+    } catch (e) {
+      print('Failed to setup player stream: $e');
+    }
+    
+    // 设置轮询作为备用机制（每3秒刷新一次）
+    _playerPollTimer = Timer.periodic(Duration(seconds: 3), (timer) async {
+      try {
+        final players = await getPlayers(roomId);
+        print('Poll refresh: ${players.length} players');
+        callback(players);
+      } catch (e) {
+        print('Error in player poll: $e');
+      }
+    });
+  }
+  
+  // 停止玩家监听
+  void stopListeningToPlayers() {
+    _playerPollTimer?.cancel();
+    _playerPollTimer = null;
   }
 
   // 监听游戏会话变化
@@ -351,6 +419,8 @@ class SupabaseService {
       _subscriptions[key]?.cancel();
       _subscriptions.remove(key);
     }
+    // 停止轮询定时器
+    stopListeningToPlayers();
   }
   
   // 清理过期房间（超过10分钟未开始游戏的waiting状态房间）
