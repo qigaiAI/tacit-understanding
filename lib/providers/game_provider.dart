@@ -240,6 +240,10 @@ class GameProvider extends ChangeNotifier {
         roomId: _currentRoom!.id,
         playerId: _currentPlayer!.id,
       );
+      
+      // 取消房间订阅
+      _supabaseService.cancelRoomSubscriptions(_currentRoom!.id);
+      
       resetState();
     } catch (e) {
       _errorMessage = '离开房间失败: $e';

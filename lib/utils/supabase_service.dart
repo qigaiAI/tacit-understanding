@@ -4,10 +4,14 @@ import 'package:tacit_understanding/models/room.dart';
 import 'package:tacit_understanding/models/player.dart';
 import 'package:tacit_understanding/models/game_session.dart';
 import 'package:tacit_understanding/providers/game_provider.dart';
+import 'dart:async';
 import 'dart:math';
 
 class SupabaseService {
   final supabase = Supabase.instance.client;
+  
+  // 保存监听器引用
+  Map<String, StreamSubscription> _subscriptions = {};
 
   // 生成6位房间号
   String _generateRoomCode() {
@@ -157,6 +161,12 @@ class SupabaseService {
 
   // 监听玩家变化
   void listenToPlayers(String roomId, Function(List<Player>) callback) {
+    // 取消之前的订阅
+    final playerKey = 'players_$roomId';
+    if (_subscriptions.containsKey(playerKey)) {
+      _subscriptions[playerKey]?.cancel();
+    }
+    
     final subscription = supabase
         .from('players')
         .stream(primaryKey: ['id'])
@@ -165,10 +175,19 @@ class SupabaseService {
       final players = data.map((e) => Player.fromJson(e)).where((p) => p.leftAt == null).toList();
       callback(players);
     });
+    
+    // 保存订阅引用
+    _subscriptions[playerKey] = subscription;
   }
 
   // 监听游戏会话变化
   void listenToGameSession(String roomId, Function(GameSession) callback) {
+    // 取消之前的订阅
+    final sessionKey = 'session_$roomId';
+    if (_subscriptions.containsKey(sessionKey)) {
+      _subscriptions[sessionKey]?.cancel();
+    }
+    
     final subscription = supabase
         .from('game_sessions')
         .stream(primaryKey: ['id'])
@@ -180,6 +199,9 @@ class SupabaseService {
         callback(GameSession.fromJson(data.first));
       }
     });
+    
+    // 保存订阅引用
+    _subscriptions[sessionKey] = subscription;
   }
 
   // 获取玩家列表
@@ -294,6 +316,23 @@ class SupabaseService {
         return 'ended';
       default:
         return 'waiting';
+    }
+  }
+  
+  // 取消所有订阅
+  void cancelAllSubscriptions() {
+    _subscriptions.forEach((key, subscription) {
+      subscription.cancel();
+    });
+    _subscriptions.clear();
+  }
+  
+  // 取消特定房间的订阅
+  void cancelRoomSubscriptions(String roomId) {
+    final keys = _subscriptions.keys.where((key) => key.contains(roomId)).toList();
+    for (final key in keys) {
+      _subscriptions[key]?.cancel();
+      _subscriptions.remove(key);
     }
   }
 }
