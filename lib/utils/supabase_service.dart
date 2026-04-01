@@ -171,9 +171,14 @@ class SupabaseService {
         .from('players')
         .stream(primaryKey: ['id'])
         .eq('room_id', roomId)
+        .order('joined_at', ascending: true)
         .listen((data) {
+      print('Received player updates: ${data.length} players');
       final players = data.map((e) => Player.fromJson(e)).where((p) => p.leftAt == null).toList();
+      print('Filtered players: ${players.map((p) => p.name).toList()}');
       callback(players);
+    }, onError: (error) {
+      print('Error in player listener: $error');
     });
     
     // 保存订阅引用

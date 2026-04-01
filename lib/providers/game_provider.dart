@@ -189,7 +189,11 @@ class GameProvider extends ChangeNotifier {
       
       _currentRoom = room;
       _currentPlayer = player;
-      _players = [player];
+      
+      // 重新获取最新的玩家列表，确保数据准确
+      final updatedPlayers = await _supabaseService.getPlayers(room.id);
+      _players = updatedPlayers;
+      print('Initial players after creating room: ${_players.length} players');
       
       // 监听房间变化
       _setupRoomListeners();
@@ -238,7 +242,11 @@ class GameProvider extends ChangeNotifier {
       
       _currentRoom = room;
       _currentPlayer = player;
-      _players = room.players;
+      
+      // 重新获取最新的玩家列表，确保包含刚加入的玩家
+      final updatedPlayers = await _supabaseService.getPlayers(room.id);
+      _players = updatedPlayers;
+      print('Initial players after joining: ${_players.length} players');
       
       // 监听房间变化
       _setupRoomListeners();
@@ -279,8 +287,11 @@ class GameProvider extends ChangeNotifier {
   void _setupRoomListeners() {
     if (_currentRoom == null) return;
     
+    print('Setting up listeners for room: ${_currentRoom!.id}');
+    
     // 监听玩家变化
     _supabaseService.listenToPlayers(_currentRoom!.id, (players) {
+      print('Updating players: ${players.length} players');
       _players = players;
       notifyListeners();
     });
