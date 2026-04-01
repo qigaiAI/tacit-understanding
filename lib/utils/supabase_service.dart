@@ -79,6 +79,18 @@ class SupabaseService {
     required String playerName,
     required bool isHost,
   }) async {
+    // 检查是否已经有同名玩家在该房间中且未离开
+    final existingPlayers = await supabase
+        .from('players')
+        .select()
+        .eq('room_id', roomId)
+        .eq('name', playerName)
+        .is_('left_at', null);
+    
+    if (existingPlayers.isNotEmpty) {
+      throw Exception('该昵称已被使用，请选择其他昵称');
+    }
+    
     final response = await supabase.from('players').insert({
       'room_id': roomId,
       'name': playerName,
@@ -338,6 +350,46 @@ class SupabaseService {
     for (final key in keys) {
       _subscriptions[key]?.cancel();
       _subscriptions.remove(key);
+    }
+  }
+  
+  // 清理过期房间（超过10分钟未开始游戏的waiting状态房间）
+  Future<void> cleanupExpiredRooms() async {
+    try {
+      final timeoutMinutes = 10;
+      final cutoffTime = DateTime.now().subtract(Duration(minutes: timeoutMinutes));
+      
+      // 获取所有过期的waiting状态房间
+      final expiredRooms = await supabase
+          .from('rooms')
+          .select('id')
+          .eq('status', 'waiting')
+          .lt('created_at', cutoffTime.toIso8601String());
+      
+      if (expiredRooms.isNotEmpty) {
+        print('Found ${expiredRooms.length} expired rooms to cleanup');
+        
+        for (final room in expiredRooms) {
+          final roomId = room['id'];
+          
+          // 标记房间为ended状态
+          await supabase
+              .from('rooms')
+              .update({'status': 'ended'})
+              .eq('id', roomId);
+          
+          // 标记房间内的所有玩家为已离开
+          await supabase
+              .from('players')
+              .update({'left_at': DateTime.now().toIso8601String()})
+              .eq('room_id', roomId)
+              .is_('left_at', null);
+        }
+        
+        print('Cleanup completed: ${expiredRooms.length} rooms processed');
+      }
+    } catch (e) {
+      print('Error during room cleanup: $e');
     }
   }
 }

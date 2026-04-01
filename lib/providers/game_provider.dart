@@ -53,6 +53,10 @@ class GameProvider extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
     await loadPresetData();
     await loadSavedState();
+    
+    // 清理过期房间
+    await _supabaseService.cleanupExpiredRooms();
+    
     _isInitialized = true;
   }
 
@@ -299,6 +303,14 @@ class GameProvider extends ChangeNotifier {
     // 监听游戏状态变化
     _supabaseService.listenToGameSession(_currentRoom!.id, (session) {
       _currentSession = session;
+      notifyListeners();
+    });
+    
+    // 再次获取最新的玩家列表，确保本地状态与数据库同步
+    // 解决监听器生效延迟的问题
+    _supabaseService.getPlayers(_currentRoom!.id).then((players) {
+      print('Refreshing players after setting up listeners: ${players.length} players');
+      _players = players;
       notifyListeners();
     });
   }

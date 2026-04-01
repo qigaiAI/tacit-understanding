@@ -42,6 +42,11 @@ CREATE TABLE game_sessions (
 -- 创建索引
 CREATE INDEX idx_rooms_code ON rooms(code);
 CREATE INDEX idx_rooms_status ON rooms(status);
+CREATE INDEX idx_rooms_created_at ON rooms(created_at);
 CREATE INDEX idx_players_room_id ON players(room_id);
 CREATE INDEX idx_players_left_at ON players(left_at);
+CREATE INDEX idx_players_room_name ON players(room_id, name);
 CREATE INDEX idx_game_sessions_room_id ON game_sessions(room_id);
+
+-- 创建复合索引，用于查询过期房间
+CREATE INDEX idx_rooms_status_created_at ON rooms(status, created_at);
