@@ -85,7 +85,7 @@ class SupabaseService {
         .select()
         .eq('room_id', roomId)
         .eq('name', playerName)
-        .is_('left_at', null);
+        .filter('left_at', 'is', null);
     
     if (existingPlayers.isNotEmpty) {
       throw Exception('该昵称已被使用，请选择其他昵称');
@@ -383,7 +383,7 @@ class SupabaseService {
               .from('players')
               .update({'left_at': DateTime.now().toIso8601String()})
               .eq('room_id', roomId)
-              .is_('left_at', null);
+              .filter('left_at', 'is', null);
         }
         
         print('Cleanup completed: ${expiredRooms.length} rooms processed');
