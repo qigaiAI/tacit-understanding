@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tacit_understanding/models/room.dart';
 import 'package:tacit_understanding/models/player.dart';
@@ -9,6 +10,7 @@ import 'dart:convert';
 
 class GameProvider extends ChangeNotifier {
   final SupabaseService _supabaseService = SupabaseService();
+  late SharedPreferences _prefs;
   
   // 状态
   Room? _currentRoom;
@@ -17,6 +19,7 @@ class GameProvider extends ChangeNotifier {
   List<Player> _players = [];
   bool _isLoading = false;
   String? _errorMessage;
+  bool _isInitialized = false;
   
   // 游戏状态
   GameMode _gameMode = GameMode.questionAnswer;
@@ -43,6 +46,16 @@ class GameProvider extends ChangeNotifier {
   List<String> get presetQuestions => _presetQuestions;
   List<String> get drawGuessWords => _drawGuessWords;
   
+  // 初始化
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+    
+    _prefs = await SharedPreferences.getInstance();
+    await loadPresetData();
+    await loadSavedState();
+    _isInitialized = true;
+  }
+
   // 加载预设数据
   Future<void> loadPresetData() async {
     if (_isDataLoaded) return;
@@ -79,6 +92,48 @@ class GameProvider extends ChangeNotifier {
         '电脑', '手机', '雨伞', '帽子', '鞋子', '衣服', '书本', '铅笔',
       ];
     }
+  }
+
+  // 加载保存的状态
+  Future<void> loadSavedState() async {
+    final roomJson = _prefs.getString('currentRoom');
+    final playerJson = _prefs.getString('currentPlayer');
+    
+    if (roomJson != null && playerJson != null) {
+      try {
+        _currentRoom = Room.fromJson(json.decode(roomJson));
+        _currentPlayer = Player.fromJson(json.decode(playerJson));
+        
+        // 重新设置监听器
+        _setupRoomListeners();
+        
+        // 重新获取玩家列表
+        if (_currentRoom != null) {
+          final players = await _supabaseService.getPlayers(_currentRoom!.id);
+          _players = players;
+        }
+        
+        notifyListeners();
+      } catch (e) {
+        print('加载保存的状态失败: $e');
+      }
+    }
+  }
+
+  // 保存状态
+  Future<void> saveState() async {
+    if (_currentRoom != null) {
+      _prefs.setString('currentRoom', json.encode(_currentRoom!.toJson()));
+    }
+    if (_currentPlayer != null) {
+      _prefs.setString('currentPlayer', json.encode(_currentPlayer!.toJson()));
+    }
+  }
+
+  // 清除保存的状态
+  Future<void> clearSavedState() async {
+    _prefs.remove('currentRoom');
+    _prefs.remove('currentPlayer');
   }
   
   // Setters
@@ -139,6 +194,9 @@ class GameProvider extends ChangeNotifier {
       // 监听房间变化
       _setupRoomListeners();
       
+      // 保存状态
+      await saveState();
+      
       return true;
     } catch (e) {
       _errorMessage = '创建房间失败: $e';
@@ -184,6 +242,9 @@ class GameProvider extends ChangeNotifier {
       
       // 监听房间变化
       _setupRoomListeners();
+      
+      // 保存状态
+      await saveState();
       
       return true;
     } catch (e) {
@@ -243,6 +304,9 @@ class GameProvider extends ChangeNotifier {
       
       // 取消房间订阅
       _supabaseService.cancelRoomSubscriptions(_currentRoom!.id);
+      
+      // 清除保存的状态
+      await clearSavedState();
       
       resetState();
     } catch (e) {

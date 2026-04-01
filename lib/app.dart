@@ -11,10 +11,18 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder(
-      future: Supabase.initialize(
-        url: Config.supabaseUrl,
-        anonKey: Config.supabaseAnonKey,
-      ),
+      future: Future.wait([
+        Supabase.initialize(
+          url: Config.supabaseUrl,
+          anonKey: Config.supabaseAnonKey,
+        ),
+        // 初始化 GameProvider
+        Future.microtask(() async {
+          final gameProvider = GameProvider();
+          await gameProvider.initialize();
+          return gameProvider;
+        })
+      ]),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return MaterialApp(
@@ -26,9 +34,10 @@ class MyApp extends StatelessWidget {
           );
         }
         if (snapshot.connectionState == ConnectionState.done) {
+          final gameProvider = snapshot.data![1] as GameProvider;
           return MultiProvider(
             providers: [
-              ChangeNotifierProvider(create: (_) => GameProvider()),
+              ChangeNotifierProvider.value(value: gameProvider),
             ],
             child: MaterialApp(
               title: '默契挑战',

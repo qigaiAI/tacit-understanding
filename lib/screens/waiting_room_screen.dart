@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:tacit_understanding/providers/game_provider.dart';
 import 'package:tacit_understanding/screens/question_answer_screen.dart';
@@ -64,8 +65,9 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
                     ),
                     const SizedBox(height: 10),
                     ElevatedButton(
-                      onPressed: () {
+                      onPressed: () async {
                         // 复制房间号到剪贴板
+                        await Clipboard.setData(ClipboardData(text: room.code));
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('房间号已复制')),
                         );

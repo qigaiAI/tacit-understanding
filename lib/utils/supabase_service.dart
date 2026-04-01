@@ -205,7 +205,7 @@ class SupabaseService {
   }
 
   // 获取玩家列表
-  Future<List<Player>> _getPlayers(String roomId) async {
+  Future<List<Player>> getPlayers(String roomId) async {
     final response = await supabase
         .from('players')
         .select()
