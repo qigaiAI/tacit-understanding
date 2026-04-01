@@ -1,0 +1,33 @@
+name: tacit_understanding
+description: A game app for testing默契 between friends
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  supabase_flutter: ^2.3.0
+  provider: ^6.1.1
+  shared_preferences: ^2.2.2
+  flutter_svg: ^2.0.9
+  web_socket_channel: ^2.4.0
+  uuid: ^4.2.2
+  path_provider: ^2.1.3
+  image: ^4.1.7
+  permission_handler: ^11.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+    - assets/images/
+    - assets/sounds/
+    - assets/data/
