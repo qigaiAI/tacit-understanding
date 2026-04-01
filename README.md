@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 默契挑战 App
 
 一个测试朋友间默契度的游戏应用，支持 2-10 人在线进行默契问答、你画我猜等挑战。
@@ -155,3 +156,21 @@ tacit-understanding/
 - 支持语音聊天
 - 增加更多游戏模式（如“谁是卧底”“你比我猜”）
 - 支持离线模式
+=======
+# tacit_understanding
+
+A new Flutter project.
+
+## Getting Started
+
+This project is a starting point for a Flutter application.
+
+A few resources to get you started if this is your first Flutter project:
+
+- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
+- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+
+For help getting started with Flutter development, view the
+[online documentation](https://docs.flutter.dev/), which offers tutorials,
+samples, guidance on mobile development, and a full API reference.
+>>>>>>> 83a326a50cfe7d7fdbbaa6f69c237615669d85fe
