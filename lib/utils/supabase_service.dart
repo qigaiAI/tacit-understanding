@@ -1,0 +1,299 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:tacit_understanding/config.dart';
+import 'package:tacit_understanding/models/room.dart';
+import 'package:tacit_understanding/models/player.dart';
+import 'package:tacit_understanding/models/game_session.dart';
+import 'package:tacit_understanding/providers/game_provider.dart';
+import 'dart:math';
+
+class SupabaseService {
+  final supabase = Supabase.instance.client;
+
+  // 生成6位房间号
+  String _generateRoomCode() {
+    const chars = '0123456789';
+    final random = Random();
+    return String.fromCharCodes(
+      List.generate(Config.roomCodeLength, (_) => chars.codeUnitAt(random.nextInt(chars.length))),
+    );
+  }
+
+  // 创建房间
+  Future<Room> createRoom({
+    required GameMode gameMode,
+    required int maxPlayers,
+    required int rounds,
+    required int drawingTime,
+  }) async {
+    String roomCode;
+    bool codeExists;
+    int attempts = 0;
+
+    do {
+      roomCode = _generateRoomCode();
+      final existingRooms = await supabase
+          .from('rooms')
+          .select('id')
+          .eq('code', roomCode)
+          .eq('status', 'waiting')
+          .limit(1);
+      codeExists = existingRooms.isNotEmpty;
+      attempts++;
+    } while (codeExists && attempts < Config.roomCodeMaxAttempts);
+
+    if (codeExists) {
+      throw Exception('无法生成唯一房间号');
+    }
+
+    final response = await supabase.from('rooms').insert({
+      'code': roomCode,
+      'game_mode': gameMode == GameMode.questionAnswer ? 'question_answer' : 'draw_and_guess',
+      'status': 'waiting',
+      'max_players': maxPlayers,
+      'rounds': rounds,
+      'drawing_time': drawingTime,
+    }).select();
+
+    final roomData = response[0];
+    return Room(
+      id: roomData['id'],
+      code: roomData['code'],
+      gameMode: gameMode,
+      status: RoomStatus.waiting,
+      maxPlayers: roomData['max_players'],
+      rounds: roomData['rounds'],
+      drawingTime: roomData['drawing_time'],
+      hostId: '', // 稍后设置
+      players: [],
+      createdAt: DateTime.parse(roomData['created_at']),
+    );
+  }
+
+  // 加入房间
+  Future<Player> joinRoom({
+    required String roomId,
+    required String playerName,
+    required bool isHost,
+  }) async {
+    final response = await supabase.from('players').insert({
+      'room_id': roomId,
+      'name': playerName,
+      'is_host': isHost,
+      'score': 0,
+    }).select();
+
+    final playerData = response[0];
+    final player = Player(
+      id: playerData['id'],
+      roomId: playerData['room_id'],
+      name: playerData['name'],
+      isHost: playerData['is_host'],
+      score: playerData['score'],
+      joinedAt: DateTime.parse(playerData['joined_at']),
+    );
+
+    // 如果是房主，更新房间的host_id
+    if (isHost) {
+      await supabase
+          .from('rooms')
+          .update({'host_id': player.id})
+          .eq('id', roomId)
+          .select();
+    }
+
+    return player;
+  }
+
+  // 根据房间号获取房间
+  Future<Room?> getRoomByCode(String code) async {
+    final response = await supabase
+        .from('rooms')
+        .select('*, players(*)')
+        .eq('code', code)
+        .limit(1);
+
+    if (response.isEmpty) {
+      return null;
+    }
+
+    final roomData = response[0];
+    final players = (roomData['players'] as List<dynamic>)
+        .map((p) => Player.fromJson(p))
+        .toList();
+
+    return Room(
+      id: roomData['id'],
+      code: roomData['code'],
+      gameMode: roomData['game_mode'] == 'question_answer' ? GameMode.questionAnswer : GameMode.drawAndGuess,
+      status: RoomStatus.values.firstWhere((s) => _getStatusToString(s) == roomData['status']),
+      maxPlayers: roomData['max_players'],
+      rounds: roomData['rounds'],
+      drawingTime: roomData['drawing_time'],
+      hostId: roomData['host_id'],
+      players: players,
+      createdAt: DateTime.parse(roomData['created_at']),
+      updatedAt: roomData['updated_at'] != null ? DateTime.parse(roomData['updated_at']) : null,
+    );
+  }
+
+  // 开始游戏
+  Future<void> startGame(String roomId) async {
+    // 更新房间状态
+    await supabase
+        .from('rooms')
+        .update({'status': 'playing'})
+        .eq('id', roomId)
+        .select();
+
+    // 创建游戏会话
+    await supabase.from('game_sessions').insert({
+      'room_id': roomId,
+      'current_round': 1,
+      'answers': {},
+      'guesses': {},
+      'drawing_actions': [],
+    }).select();
+  }
+
+  // 监听玩家变化
+  void listenToPlayers(String roomId, Function(List<Player>) callback) {
+    final subscription = supabase
+        .from('players')
+        .stream(primaryKey: ['id'])
+        .eq('room_id', roomId)
+        .listen((data) {
+      final players = data.map((e) => Player.fromJson(e)).where((p) => p.leftAt == null).toList();
+      callback(players);
+    });
+  }
+
+  // 监听游戏会话变化
+  void listenToGameSession(String roomId, Function(GameSession) callback) {
+    final subscription = supabase
+        .from('game_sessions')
+        .stream(primaryKey: ['id'])
+        .eq('room_id', roomId)
+        .order('created_at', ascending: false)
+        .limit(1)
+        .listen((data) {
+      if (data.isNotEmpty) {
+        callback(GameSession.fromJson(data.first));
+      }
+    });
+  }
+
+  // 获取玩家列表
+  Future<List<Player>> _getPlayers(String roomId) async {
+    final response = await supabase
+        .from('players')
+        .select()
+        .eq('room_id', roomId);
+
+    return (response as List<dynamic>)
+        .map((p) => Player.fromJson(p))
+        .where((player) => player.leftAt == null)
+        .toList();
+  }
+
+  // 获取游戏会话
+  Future<GameSession?> _getGameSession(String roomId) async {
+    final response = await supabase
+        .from('game_sessions')
+        .select()
+        .eq('room_id', roomId)
+        .order('created_at', ascending: false)
+        .limit(1);
+
+    if (response.isEmpty) {
+      return null;
+    }
+
+    return GameSession.fromJson(response[0]);
+  }
+
+  // 离开房间
+  Future<void> leaveRoom({
+    required String roomId,
+    required String playerId,
+  }) async {
+    await supabase
+        .from('players')
+        .update({'left_at': DateTime.now().toIso8601String()})
+        .eq('id', playerId)
+        .select();
+  }
+
+  // 提交答案
+  Future<void> submitAnswer({
+    required String roomId,
+    required String playerId,
+    required String answer,
+  }) async {
+    final session = await _getGameSession(roomId);
+    if (session == null) return;
+
+    final updatedAnswers = Map<String, String>.from(session.answers);
+    updatedAnswers[playerId] = answer;
+
+    await supabase
+        .from('game_sessions')
+        .update({'answers': updatedAnswers})
+        .eq('id', session.id)
+        .select();
+  }
+
+  // 提交猜词
+  Future<void> submitGuess({
+    required String roomId,
+    required String playerId,
+    required String guess,
+  }) async {
+    final session = await _getGameSession(roomId);
+    if (session == null) return;
+
+    final updatedGuesses = Map<String, String>.from(session.guesses);
+    if (!updatedGuesses.containsKey(playerId)) {
+      updatedGuesses[playerId] = guess;
+
+      await supabase
+          .from('game_sessions')
+          .update({'guesses': updatedGuesses})
+          .eq('id', session.id)
+          .select();
+    }
+  }
+
+  // 发送作画动作
+  Future<void> sendDrawingAction({
+    required String roomId,
+    required DrawingAction action,
+  }) async {
+    final session = await _getGameSession(roomId);
+    if (session == null) return;
+
+    final updatedActions = List<DrawingAction>.from(session.drawingActions);
+    updatedActions.add(action);
+
+    await supabase
+        .from('game_sessions')
+        .update({
+          'drawing_actions': updatedActions.map((a) => a.toJson()).toList(),
+        })
+        .eq('id', session.id)
+        .select();
+  }
+
+  // 获取状态字符串
+  String _getStatusToString(RoomStatus status) {
+    switch (status) {
+      case RoomStatus.waiting:
+        return 'waiting';
+      case RoomStatus.playing:
+        return 'playing';
+      case RoomStatus.ended:
+        return 'ended';
+      default:
+        return 'waiting';
+    }
+  }
+}
